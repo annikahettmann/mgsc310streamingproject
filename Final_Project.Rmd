@@ -1,0 +1,175 @@
+---
+title: "Streaming Service Final Projects"
+author: "Samatha Bae, Isabella Fangary, Annika Hettmann, and Garrett Vetter"
+subtitle: MGSC 310 Final Project
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+```{r setup, include=FALSE}
+
+# Please leave this code chunk as is. It makes some slight formatting changes to alter the output to be more aesthetically pleasing. 
+
+library(knitr)
+
+# Change the number in set seed to your own favorite number
+set.seed(1818)
+options(width=70)
+options(scipen=99)
+
+
+# this sets text outputted in code chunks to small
+opts_chunk$set(tidy.opts=list(width.wrap=50),tidy=TRUE, size = "vsmall")  
+opts_chunk$set(message = FALSE,                                          
+               warning = FALSE,
+               # "caching" stores objects in code chunks and only rewrites if you change things
+               cache = FALSE,                               
+               # automatically downloads dependency files
+               autodep = TRUE,
+               # 
+               cache.comments = FALSE,
+               # 
+               collapse = TRUE,
+               # change fig.width and fig.height to change the code height and width by default
+               fig.width = 5.5,  
+               fig.height = 4.5,
+               fig.align='center')
+
+
+```
+
+```{r setup-2}
+
+# Always print this out before your assignment
+sessionInfo()
+getwd()
+
+```
+
+
+```{r setup-3}
+
+# all libraries 
+library('tidyverse')
+library('factoextra')
+library('cluster')
+library('NbClust')
+library('coefplot')
+library('ggplot2')
+library('rsample')
+library('glmnet')
+library('dplyr')
+library('glmnetUtils')
+library('forcats')
+library('tidytext')
+library('stringr')
+library('wordcloud')
+library('RColorBrewer')
+library('tm')
+library('syuzhet')
+
+```
+
+
+
+
+## Loading The Dataset
+
+```{r}
+
+Streaming <- 
+  read_csv(here::here("datasets",
+                      "All_Streaming_Shows.csv"))
+
+# showing the head, summary, and viewing the data in another window 
+head(Streaming)
+
+summary(Streaming)
+
+View(Streaming)
+
+```
+## Data Clean-Up
+
+```{r}
+
+Streaming_clean <- Streaming %>% filter(`Content Rating` != "N/A", `Content Rating` != "", `IMDB Rating` != "") %>% mutate(Main_Genre = as.factor(unlist(map(strsplit(as.character(.$Genre), "\\,"), 1))), Content_Rating = as.numeric(unlist(map(strsplit(as.character(.$`Content Rating`),"\\+"), 1))), IMDB_Rating = as.numeric(`IMDB Rating`), RT_Rating = as.numeric(`R Rating`), Seasons = unlist(map(strsplit(as.character(.$`No of Seasons`), "[S]"), 1)), Seasons = as.numeric(Seasons), Streaming_Platform = strsplit(as.character(.$`Streaming Platform`),","))
+
+streaming_df <- Streaming_clean %>% as_tibble() %>% mutate(Seasons_binary = as.factor(ifelse(Streaming_clean$Seasons>1,1,0))) %>% mutate_if(is.character, as.factor) %>% drop_na()
+
+glimpse(streaming_df)
+summary(streaming_df)
+
+```
+
+## Graph: Scatterplot
+```{r}
+
+gg <- ggplot(streaming_df, aes(x =  Seasons, y = `R Rating`)) + geom_point(aes(col = Seasons_binary)) + geom_smooth(method=lm) + labs(title = "Scatterplot of Streaming Show’s Seasons vs RT Rating", x = "Seasons", y = "Rotten Tomatoes Rating")
+plot(gg)
+
+```
+
+
+## Model One: Word Sentiments
+# Wordcloud on Description
+```{r}
+
+Streaming_split <- initial_split(streaming_df, prop=0.75)
+Streaming_train <- training(Streaming_split)
+Streaming_test <- testing(Streaming_split)
+filter(Streaming_test, Seasons_binary == 1)
+text <- Streaming_test$Description
+docs <- Corpus(VectorSource(text))
+docs <- docs %>% tm_map(removeNumbers) %>% tm_map(removePunctuation) %>% tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+dtm <- TermDocumentMatrix(docs)
+matrix <- as.matrix(dtm)
+words <- sort(rowSums(matrix), decreasing=TRUE)
+Streaming_test <- data.frame(word = names(words), freq=words)
+set.seed(1884)
+Streaming_words <- wordcloud(words = Streaming_test$word, freq=Streaming_test$freq, min.freq = 1, max.words = 200, random.order = FALSE, rot.per=0.35, colors = brewer.pal(8, "Dark2"))
+
+```
+
+# Calculated Sentiments on Description
+```{r}
+
+Streaming_split <- initial_split(streaming_df, prop=0.75)
+Streaming_train <- training(Streaming_split)
+Streaming_test <- testing(Streaming_split)
+filter(Streaming_test, Seasons_binary == 1)
+text <- Streaming_test$Description
+docs <- Corpus(VectorSource(text))
+docs <- docs %>% tm_map(removeNumbers) %>% tm_map(removePunctuation) %>% tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+Streaming_words <- iconv(docs)
+sentiment_description <- get_nrc_sentiment(Streaming_words)
+head(sentiment_description)
+
+```
+
+# Wordcloud on Main Genre
+```{r}
+
+Streaming_split <- initial_split(streaming_df, prop=0.75)
+Streaming_train <- training(Streaming_split)
+Streaming_test <- testing(Streaming_split)
+filter(Streaming_test, Seasons_binary == 1)
+text <- Streaming_test$Main_Genre
+docs <- Corpus(VectorSource(text))
+docs <- docs %>% tm_map(removeNumbers) %>% tm_map(removePunctuation) %>% tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+dtm <- TermDocumentMatrix(docs)
+matrix <- as.matrix(dtm)
+words <- sort(rowSums(matrix), decreasing=TRUE)
+Streaming_test <- data.frame(word = names(words), freq=words)
+set.seed(1884)
+Streaming_genres <- wordcloud(words = Streaming_test$word, freq=Streaming_test$freq, min.freq = 1, max.words = 200, random.order = FALSE, rot.per=0.35, colors = brewer.pal(8, "Dark2"))
+
+```
