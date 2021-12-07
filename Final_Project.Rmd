@@ -1,5 +1,5 @@
 ---
-title: "Streaming Service Final Projects"
+title: "TV Shows Final Project"
 author: "Samatha Bae, Isabella Fangary, Annika Hettmann, and Garrett Vetter"
 subtitle: MGSC 310 Final Project
 output:
@@ -55,64 +55,25 @@ getwd()
 library('tidyverse')
 library('factoextra')
 library('cluster')
-library('NbClust')
-library('coefplot')
-library('ggplot2')
 library('rsample')
 library('glmnet')
-library('dplyr')
 library('glmnetUtils')
 library('forcats')
-library('tidytext')
-library('stringr')
-library('wordcloud')
-library('RColorBrewer')
-library('tm')
-library('syuzhet')
+library('dplyr') 
+library('knitr')
+library(PerformanceAnalytics)
+library(rpart)       
+library(rpart.plot)  
+library('randomForest')
 
 ```
 
 
 
 
-## Loading The Dataset
 
-```{r}
-
-Streaming <- 
-  read_csv(here::here("datasets",
-                      "All_Streaming_Shows.csv"))
-
-# showing the head, summary, and viewing the data in another window 
-head(Streaming)
-
-summary(Streaming)
-
-View(Streaming)
-
-```
-## Data Clean-Up
-
-```{r}
-
-Streaming_clean <- Streaming %>% filter(`Content Rating` != "N/A", `Content Rating` != "", `IMDB Rating` != "") %>% mutate(Main_Genre = as.factor(unlist(map(strsplit(as.character(.$Genre), "\\,"), 1))), Content_Rating = as.numeric(unlist(map(strsplit(as.character(.$`Content Rating`),"\\+"), 1))), IMDB_Rating = as.numeric(`IMDB Rating`), RT_Rating = as.numeric(`R Rating`), Seasons = unlist(map(strsplit(as.character(.$`No of Seasons`), "[S]"), 1)), Seasons = as.numeric(Seasons), Streaming_Platform = strsplit(as.character(.$`Streaming Platform`),","))
-
-streaming_df <- Streaming_clean %>% as_tibble() %>% mutate(Seasons_binary = as.factor(ifelse(Streaming_clean$Seasons>1,1,0))) %>% mutate_if(is.character, as.factor) %>% drop_na()
-
-glimpse(streaming_df)
-summary(streaming_df)
-
-```
-
-## Graph: Scatterplot
-```{r}
-
-gg <- ggplot(streaming_df, aes(x =  Seasons, y = `R Rating`)) + geom_point(aes(col = Seasons_binary)) + geom_smooth(method=lm) + labs(title = "Scatterplot of Streaming Show’s Seasons vs RT Rating", x = "Seasons", y = "Rotten Tomatoes Rating")
-plot(gg)
-
-```
-
-
+# Model One: Word Sentiments
+## Determine optimal number of clusters 
 ## Model One: Word Sentiments
 # Wordcloud on Description
 ```{r}
@@ -171,5 +132,524 @@ words <- sort(rowSums(matrix), decreasing=TRUE)
 Streaming_test <- data.frame(word = names(words), freq=words)
 set.seed(1884)
 Streaming_genres <- wordcloud(words = Streaming_test$word, freq=Streaming_test$freq, min.freq = 1, max.words = 200, random.order = FALSE, rot.per=0.35, colors = brewer.pal(8, "Dark2"))
+
+```
+
+
+## Graph: Scatterplot
+```{r}
+
+gg <- ggplot(streaming_df, aes(x =  Seasons, y = `R Rating`)) + geom_point(aes(col = Seasons_binary)) + geom_smooth(method=lm) + labs(title = "Scatterplot of Streaming Show’s Seasons vs RT Rating", x = "Seasons", y = "Rotten Tomatoes Rating")
+plot(gg)
+
+```
+
+
+
+
+
+# Model Two: Ridge Model 
+## # Estimating Ridge Model 
+
+```{r}
+library('dplyr')
+
+Streaming_clean <- Streaming %>%
+filter(`Content Rating` != "N/A", `Content Rating` != "", `IMDB Rating` != "") %>%
+mutate(Main_Genre = as.factor(unlist(map(strsplit(as.character(.$Genre), "\\,"), 1))),
+Content_Rating = as.numeric(unlist(map(strsplit(as.character(.$`Content Rating`),"\\+"), 1))),
+IMDB_Rating = as.numeric(`IMDB Rating`),
+RT_Rating = as.numeric(`R Rating`),
+Seasons = unlist(map(strsplit(as.character(.$`No of Seasons`), "[S]"), 1)),
+Seasons = as.numeric(Seasons),
+Streaming_Platform = strsplit(as.character(.$`Streaming Platform`),","))
+
+
+View(Streaming_clean)
+glimpse(Streaming_clean)
+
+streaming_df <- Streaming_clean %>% as_tibble() %>%
+mutate(Seasons_binary = as.factor(ifelse(Streaming_clean$Seasons>1, 1, 0))) %>%
+mutate_if(is.character, as.factor) %>%
+drop_na()
+
+set.seed(1818)
+streaming_split <- initial_split(streaming_df, prop = 0.75)
+streaming_train <- training(streaming_split)
+streaming_test <- testing(streaming_split)
+
+streaming_mod_train <- cv.glmnet(Seasons_binary ~ Main_Genre + Content_Rating + IMDB_Rating + RT_Rating,
+                            data = streaming_train,
+                            alpha = 0,
+                            family = binomial)
+
+print(streaming_mod_train$lambda.min)
+
+print(streaming_mod_train$lambda.1se)
+
+coef(streaming_mod_train, s = streaming_mod1$lambda.min) %>% 
+  round(3)
+
+coef(streaming_mod_train, s = streaming_mod1$lambda.1se) %>% 
+  round(3)
+
+plot(streaming_mod_train)
+
+
+
+streaming_mod_test <- cv.glmnet(Seasons_binary ~ Main_Genre + Content_Rating + IMDB_Rating + RT_Rating,
+                            data = streaming_test,
+                            alpha = 0,
+                            family = binomial)
+
+print(streaming_mod_test$lambda.min)
+
+print(streaming_mod_test$lambda.1se)
+
+coef(streaming_mod_test, s = streaming_mod1$lambda.min) %>% 
+  round(3)
+
+coef(streaming_mod_test, s = streaming_mod1$lambda.1se) %>% 
+  round(3)
+
+plot(streaming_mod_test)
+
+
+str(streaming_mod_test)
+
+# Training
+preds_train_streaming <- predict(streaming_mod_train, newdata = streaming_train, type = "response")
+
+
+# Testing
+preds_test_streaming <- predict(streaming_mod_test, newdata = streaming_test, type = "response")
+
+
+
+results_train <- data.frame(
+  `truth` = streaming_train %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` = preds_train_streaming,
+  `type` = rep("train",length(preds_train_streaming))
+) %>% rename("Class1" = 2)
+
+results_test <- data.frame(
+  `truth` = streaming_test  %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` =  preds_test_streaming,
+  `type` = rep("test",length(preds_test_streaming))
+) %>% rename("Class1" = 2)
+
+results <- bind_rows(results_train,results_test)
+
+library('plotROC')
+
+p_train <- ggplot(results_train,
+            aes(m = Class1, d= as.numeric(Seasons_binary))) +
+  geom_roc(labelsize = 3.5,
+           cutoffs.at =
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+ 
+p_test <- ggplot(results_test,
+            aes(m = Class1, d= as.numeric(Seasons_binary))) +
+  geom_roc(labelsize = 3.5,
+           cutoffs.at =
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+
+plot(p_train) +
+  theme_minimal(base_size = 30)
+plot(p_test)+
+  theme_minimal(base_size = 30)
+
+p <- ggplot(results,
+            aes(m = Class1, d= as.numeric(Seasons_binary), color = type)) +
+  geom_roc(labelsize = 3.5,
+           cutoffs.at =
+             c(0.99,0.9,0.7,0.5,0.3,0.1,.05, 0)) +
+  theme_minimal(base_size = 16)
+plot(p) +
+  theme_minimal(base_size = 30)
+  
+
+calc_auc(p_test)
+calc_auc(p_train)
+calc_auc(p)
+
+```
+
+
+
+# Model Three: Lasso Model 
+## # Estimating Lasso Model 
+
+```{r}
+
+
+
+lasso_mod_train <- cv.glmnet(Seasons_binary ~ IMDB_Rating + factor(Main_Genre) + RT_Rating + Content_Rating,
+                       data = streaming_train,
+                       alpha = 1,
+                       family = binomial)
+
+lasso_mod_test <- cv.glmnet(Seasons_binary ~ IMDB_Rating + factor(Main_Genre) + RT_Rating + Content_Rating,
+                       data = streaming_test,
+                       alpha = 1,
+                       family = binomial)
+
+minlam = lasso_mod_train$lambda.min
+print(minlam)
+
+selam = lasso_mod_train$lambda.1se
+
+print(selam)
+
+plot(lasso_mod_train)
+
+coef(lasso_mod_train, s = "lambda.min")
+
+
+lasso_coefs <- data.frame(
+  `lasso_min` = coef(lasso_mod, s = lasso_mod$lambda.min) %>% 
+    round(3) %>% as.matrix() %>% as.data.frame(),
+  `lasso_1se` = coef(lasso_mod, s = lasso_mod$lambda.1se) %>% 
+    round(3) %>% as.matrix() %>% as.data.frame()
+) %>% rename(`lasso_min` = 1, `lasso_1se` = 2)
+print(lasso_coefs)
+
+coefpath(lasso_mod)
+
+
+
+# Training
+preds_train <- predict(lasso_mod_train, newdata = streaming_train, s = "lambda.min", type = "response")
+
+
+# Testing
+preds_test <- predict(lasso_mod_test, newdata = streaming_test, s = "lambda.min", type = "response")
+
+results_train <- data.frame(
+  `truth` = streaming_train %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` =  preds_train,
+  `type` = rep("train",length(preds_train))
+  ) %>% 
+  rename("Class1" = 2)
+
+
+results_test <- data.frame(
+  `truth` = streaming_test  %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` =  preds_test,
+  `type` = rep("test",length(preds_test))
+  ) %>% 
+  rename("Class1" = 2)
+
+
+results <- bind_rows(results_train,results_test)
+
+lassogg <- ggplot(results, 
+            aes(m = Class1, d = as.numeric(Seasons_binary), color = type)) + 
+            geom_roc(labelsize = 3.5, 
+                     cutoffs.at = 
+                       c(0.99, 0.9, 0.7, 0.5, 0.3, 0.1, 0)) +
+            theme_minimal(base_size = 16)
+            
+print(lassogg)
+
+calc_auc(lassogg)
+
+
+
+
+
+
+
+```
+
+
+
+
+# Model Four: Random Forests
+## # Estimating Random Forest
+
+```{r}
+
+
+
+library("tidyverse")
+
+
+Streaming <- 
+  read_csv(here::here("datasets",
+                      "All_Streaming_Shows.csv"))
+
+
+Streaming_clean <- Streaming %>% 
+  filter(`Content Rating` != "N/A", `Content Rating` != "", `IMDB Rating` != "") %>% 
+  mutate(Main_Genre = as.factor(unlist(map(strsplit(as.character(.$Genre), "\\,"), 1))),
+  Content_Rating = as.numeric(unlist(map(strsplit(as.character(.$`Content Rating`),"\\+"), 1))),
+  IMDB_Rating = as.numeric(`IMDB Rating`),
+  RT_Rating = as.numeric(`R Rating`),
+  Seasons = unlist(map(strsplit(as.character(.$`No of Seasons`), "[S]"), 1)), 
+  Seasons = as.numeric(Seasons),
+  Streaming_Platform = strsplit(as.character(.$`Streaming Platform`),","))
+
+
+streaming_df <- Streaming_clean %>% as_tibble() %>% 
+  mutate(Seasons_binary = as.factor(ifelse(Streaming_clean$Seasons>1, 1, 0))) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  drop_na()
+
+set.seed(1818)
+streaming_split <- initial_split(streaming_df, prop = 0.75)
+streaming_train <- training(streaming_split)
+streaming_test <- testing(streaming_split)
+
+
+# making the radom forest model 
+rf_fit_streaming <- randomForest(Seasons_binary ~ 
+                         Main_Genre + Content_Rating + IMDB_Rating + 
+                         RT_Rating, 
+                       data = streaming_df,
+                       type = classification,
+                       mtry = 2,
+                       na.action = na.roughfix,
+                       ntree = 100, #number of models it is going to fit
+                       importance = TRUE)
+
+print(rf_fit_streaming)
+
+# This will tells us the best number of decision trees we need 
+plot(rf_fit_streaming)
+
+
+# to ensure the we have the right mtry we run this code to see what the graph says is the best mtry 
+rf_mods <- list()
+oob_err <- NULL
+test_err <- NULL
+for(mtry in 1:5){
+  rf_fit_streaming <- randomForest(Seasons_binary ~ 
+                         Main_Genre + Content_Rating + IMDB_Rating + 
+                         RT_Rating, 
+                       data = streaming_df,
+                       type = classification,
+                       mtry = mtry,
+                       na.action = na.roughfix,
+                       ntree = 100, #number of models it is going to fit
+                       importance = TRUE)
+
+  oob_err[mtry] <- rf_fit_streaming$err.rate[200]
+  
+  cat(mtry," ")
+}
+
+results_DF <- data.frame(mtry = 1:5, oob_err)
+ggplot(results_DF, aes(x = mtry, y = oob_err)) + geom_point() + theme_minimal(base_size = 16)
+
+# partial dependence plots only changing genre
+library('pdp')
+pdp::partial(rf_fit_streaming, 
+             pred.var = "RT_Rating", 
+             plot = TRUE,
+             rug = TRUE,
+             plot.engine = "ggplot2",
+             smooth = TRUE)
+
+## PDP prediction interaction
+library('randomForestExplainer')
+plot_predict_interaction(rf_fit_streaming, 
+                         streaming_df,
+                         "Content_Rating",
+                         "IMDB_Rating")
+
+#to find the most important variable
+importance(rf_fit_streaming, type = 1, scale = FALSE)
+#to find the most important variable graphically 
+varImpPlot(rf_fit_streaming, type = 1, scale = FALSE)
+
+
+# min depth distribution
+plot_min_depth_distribution(rf_fit_streaming)
+
+
+
+
+# Training
+preds_train_streaming <- predict(rf_fit_streaming, newdata = streaming_train, type = "vote") %>% 
+  as_tibble() %>% select("1")
+
+head(preds_train_streaming)
+
+
+# Testing
+preds_test_streaming <- predict(rf_fit_streaming, newdata = streaming_test, type = "vote") %>% 
+  as_tibble() %>% select("1")
+
+head(preds_test_streaming)
+
+
+
+results_train <- data.frame(
+  `truth` = streaming_train %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)-1),
+  `Class1` = preds_train_streaming,
+  `type` = rep("train",length(preds_train_streaming))
+) %>% rename("Class1" = 2)
+
+results_test <- data.frame(
+  `truth` = streaming_test  %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)-1),
+  `Class1` =  preds_test_streaming,
+  `type` = rep("test",length(preds_test_streaming))
+) %>% rename("Class1" = 2)
+
+library('plotROC')
+
+p_train <- ggplot(results_train, 
+            aes(m = Class1, d= as.numeric(Seasons_binary))) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+p_test <- ggplot(results_test, 
+            aes(m = Class1, d= as.numeric(Seasons_binary))) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,0)) +
+  theme_minimal(base_size = 16)
+
+plot(p_train)
+plot(p_test)
+
+results <- bind_rows(results_train,results_test)
+
+p <- ggplot(results, 
+            aes(m = Class1, d= as.numeric(Seasons_binary), color = type)) + 
+  geom_roc(labelsize = 3.5, 
+           cutoffs.at = 
+             c(0.99,0.9,0.7,0.5,0.3,0.1,.05, 0)) +
+  theme_minimal(base_size = 16)
+print(p)
+
+calc_auc(p_test)
+calc_auc(p_train)
+calc_auc(p)
+```
+
+# Model Five: Logistic Regression 
+## # Estimating Logistic Regression
+```{r}
+
+logit_mod_train <- glm(Seasons_binary ~ IMDB_Rating + factor(Main_Genre) + RT_Rating + Content_Rating,
+                       data = streaming_train, family = binomial)
+
+logit_mod_test <- glm(Seasons_binary ~ IMDB_Rating + factor(Main_Genre) + RT_Rating + Content_Rating,
+                       data = streaming_test, family = binomial)
+
+
+summary(logit_mod_train)
+
+exp(logit_mod_train$coefficients)
+
+
+scores <- predict(logit_mod_train,
+                  type = "response")
+
+levels(streaming_train)
+
+preds_test <- predict(logit_mod_test, newdata = streaming_test, type = "response")
+preds_train <- predict(logit_mod_train, newdata = streaming_train, type = "response")
+
+conf_mat(two_class_example, 
+         truth = truth, 
+         estimate = predicted)
+
+results_train <- data.frame(
+  `truth` = streaming_train %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` =  preds_train,
+  `type` = rep("train",length(preds_train))
+)
+
+results_test <- data.frame(
+  `truth` = streaming_test  %>% select(Seasons_binary) %>%
+    mutate(Seasons_binary = as.numeric(Seasons_binary)),
+  `Class1` =  preds_test,
+  `type` = rep("test",length(preds_test))
+)
+
+results <- bind_rows(results_train, results_test)
+
+
+logitgg <- ggplot(results, 
+            aes(m = Class1, d = as.numeric(Seasons_binary), color = type)) + 
+            geom_roc(labelsize = 3.5, 
+                     cutoffs.at = 
+                       c(0.99, 0.9, 0.7, 0.5, 0.3, 0.1, 0)) +
+            theme_minimal(base_size = 16)
+            
+print(logitgg)
+
+calc_auc(logitgg)
+```
+
+
+
+#Visulizations 
+
+```{r}
+
+library("tidyverse")
+
+
+Streaming <- 
+  read_csv(here::here("datasets",
+                      "All_Streaming_Shows.csv"))
+
+
+Streaming_clean <- Streaming %>% 
+  filter(`Content Rating` != "N/A", `Content Rating` != "", `IMDB Rating` != "") %>% 
+  mutate(Main_Genre = as.factor(unlist(map(strsplit(as.character(.$Genre), "\\,"), 1))),
+  Content_Rating = as.numeric(unlist(map(strsplit(as.character(.$`Content Rating`),"\\+"), 1))),
+  IMDB_Rating = as.numeric(`IMDB Rating`),
+  RT_Rating = as.numeric(`R Rating`),
+  Seasons = unlist(map(strsplit(as.character(.$`No of Seasons`), "[S]"), 1)), 
+  Seasons = as.numeric(Seasons),
+  Streaming_Platform = strsplit(as.character(.$`Streaming Platform`),",")) %>% 
+  filter(!(Main_Genre %in% c('2020', '2019', '2018', '2017', '2016', '2015', '2014', '2013', '2012','2010','2009','2008', '2006','1997', '1981','1958', '1957','1952', '-1')))
+
+
+streaming_df <- Streaming_clean %>% as_tibble() %>% 
+  mutate(Seasons_binary = as.factor(ifelse(Streaming_clean$Seasons>1, 1, 0))) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  drop_na()
+
+set.seed(1818)
+streaming_split <- initial_split(streaming_df, prop = 0.75)
+streaming_train <- training(streaming_split)
+streaming_test <- testing(streaming_split)
+
+library(ggridges)
+ 
+#1
+ggplot(streaming_train, 
+       aes(x = Seasons, y = Main_Genre, fill = '')) + xlim(0, 7.5) +
+  geom_density_ridges()+ theme_minimal () +
+  theme(legend.position = "none")+
+  labs(x = 'Number of Seasons', y = 'Genre')
+
+
+#2
+library('ggthemes')
+ggplot(streaming_train, aes(x = RT_Rating, y = Seasons)) + 
+  geom_point() +
+  ylim(0,20)
+  theme_minimal(base_size = 16) + 
+  labs(x = "Rotten Tomatoes Rating", y = 'Number of Seasons')
+
 
 ```
